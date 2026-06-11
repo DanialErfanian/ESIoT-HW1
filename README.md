@@ -1,4 +1,11 @@
-# README - تمرین به‌روزرسانی Firmware روی ESP32-S3
+# Embedded/IoT Security - Homework 1
+
+## Student Info
+
+- Name: `Danial Erfanian`
+- Student ID: `402211745`
+
+---
 
 ## مشخصات اجرا
 
