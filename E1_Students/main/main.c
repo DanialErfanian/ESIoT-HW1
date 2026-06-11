@@ -528,7 +528,7 @@ static void cmd_update_apply(const char *manifest_url) {
     }
 
     /* 3) Anti-rollback: reject versions lower than the last valid version. */
-    if (m.version < g_current_version) {
+    if (m.version <= g_current_version) {
         uart_printf("ERR version_too_old offered=%lu current=%lu\r\n",
                     (unsigned long)m.version, (unsigned long)g_current_version);
         return;

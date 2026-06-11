@@ -378,7 +378,7 @@ def print_pubkey_c_array(key):
     }
 
     /* 3) Anti-rollback: reject versions lower than the last valid version. */
-    if (m.version < g_current_version) {
+    if (m.version <= g_current_version) {
         uart_printf("ERR version_too_old offered=%lu current=%lu\r\n",
                     (unsigned long)m.version, (unsigned long)g_current_version);
         return;
@@ -422,6 +422,5 @@ def print_pubkey_c_array(key):
 
 
 ## جمع‌بندی
-
-در این تمرین مشخص شد که hash فقط سلامت فایل را نسبت به manifest بررسی می‌کند، اما قابل اعتماد بودن خود manifest را تضمین نمی‌کند. نسخه‌ی فعلی firmware تنها `device_model`، `size` و `sha256` را بررسی می‌کند و نه امضای دیجیتال manifest و نه ترتیب نسخه‌ها را. برای جلوگیری از بسته‌های جعلی و حمله‌ی rollback، لازم است manifest امضای دیجیتال داشته باشد و نسخه‌ی جدید فقط در صورتی پذیرفته شود که از نسخه‌ی ذخیره‌شده در NVS بزرگ‌تر باشد.
-```
+در این تمرین مشخص شد که بررسی SHA-256 فقط یکپارچگی فایل firmware را نسبت به مقدار داخل manifest تضمین می‌کند و به‌تنهایی برای اعتماد به بسته کافی نیست. در نسخه‌ی اولیه، چون امضای دیجیتال manifest بررسی نمی‌شد، مهاجم می‌توانست هم فایل firmware و هم manifest را تغییر دهد و بسته‌ی جعلی همچنان پذیرفته شود. همچنین به دلیل نبود بررسی نسخه، امکان rollback به نسخه‌ی قدیمی‌تر وجود داشت.
+برای رفع این ضعف‌ها، در طراحی جدید ابتدا امضای دیجیتال manifest با کلید عمومی داخل firmware اعتبارسنجی می‌شود و سپس نسخه‌ی پیشنهادی با نسخه‌ی ذخیره‌شده در NVS مقایسه می‌گردد. به این ترتیب، بسته‌های جعلی و نسخه‌های قدیمی‌تر رد می‌شوند و فرآیند به‌روزرسانی امنیت بیشتری پیدا می‌کند.
