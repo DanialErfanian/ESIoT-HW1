@@ -7,25 +7,25 @@
 
 ---
 
-## مشخصات اجرا
+## Execution Specifications
 
-* برد: `ESP32-S3`
-* مدل دستگاه: `ce-40876`
-* IP لپ‌تاپ: `10.114.151.190`
-* پورت HTTP: `8000`
-* پورت سریال: `/dev/ttyACM0`
+* Board: `ESP32-S3`
+* Device model: `ce-40876`
+* Laptop IP: `10.114.151.190`
+* HTTP port: `8000`
+* Serial port: `/dev/ttyACM0`
 
-خروجی شناسایی Flash:
+Flash detection output:
 
 ```text
 Chip type: ESP32-S3
 Detected flash size: 16MB
 MAC: 1c:db:d4:99:55:e8
-```
+````
 
 ---
 
-## آماده‌سازی فایل Firmware
+## Firmware File Preparation
 
 ```bash
 mkdir -p files
@@ -34,7 +34,7 @@ cp E1_Students/build/CE40876_E2_update.bin files/
 
 ---
 
-## ساخت Manifest
+## Creating the Manifest
 
 ```bash
 python3 tools/make_manifest.py \
@@ -45,7 +45,7 @@ python3 tools/make_manifest.py \
   --out files/manifest.json
 ```
 
-## manifest:
+## Manifest:
 
 ```json
 {
@@ -59,14 +59,14 @@ python3 tools/make_manifest.py \
 
 ---
 
-## اجرای سرور HTTP
+## Running the HTTP Server
 
 ```bash
 cd files
 python3 -m http.server 8000
 ```
 
-آدرس مورد استفاده برای manifest:
+Manifest URL used:
 
 ```text
 http://10.114.151.190:8000/manifest.json
@@ -74,9 +74,9 @@ http://10.114.151.190:8000/manifest.json
 
 ---
 
-## دستورات موجود روی برد
+## Available Commands on the Board
 
-طبق firmware فعلی، دستورات پشتیبانی‌شده عبارت‌اند از:
+According to the current firmware, the supported commands are:
 
 ```text
 help
@@ -87,15 +87,15 @@ reset_state CONFIRM
 
 ---
 
-## اجرای به‌روزرسانی روی برد
+## Applying the Update on the Board
 
-در مانیتور سریال (نرخ باود `115200`):
+In the serial monitor, with baud rate `115200`:
 
 ```text
 update_apply http://10.114.151.190:8000/manifest.json
 ```
 
-خروجی قبل از به‌روزرسانی:
+Output before the update:
 
 ```text
 > version
@@ -104,14 +104,14 @@ current_version=1
 update_state=ready
 ```
 
-خروجی هنگام به‌روزرسانی موفق:
+Output during a successful update:
 
 ```text
 > update_apply http://10.114.151.190:8000/manifest.json
 UPDATE_OK version=2
 ```
 
-خروجی بعد از به‌روزرسانی موفق:
+Output after the successful update:
 
 ```text
 > version
@@ -122,27 +122,25 @@ update_state=ready
 
 ---
 
-## بررسی‌هایی که firmware فعلی واقعاً انجام می‌دهد
+## Checks That the Current Firmware Actually Performs
 
-در نسخه‌ی فعلی `main.c`، تابع `cmd_update_apply` این مراحل را به ترتیب انجام می‌دهد:
+In the current version of `main.c`, the `cmd_update_apply` function performs the following steps in order:
 
-1. دانلود manifest از طریق HTTP
-2. تجزیه (parse) فیلدهای manifest
-3. بررسی برابری `device_model` با `ce-40876`
-4. دانلود فایل firmware به‌صورت چانک‌چانک و محاسبه‌ی streaming `SHA-256` و اندازه‌ی واقعی
-5. بررسی برابری `size`
-6. بررسی برابری `sha256`
-7. ذخیره‌ی `version` در NVS و چاپ `UPDATE_OK version=N`
+1. Downloads the manifest over HTTP
+2. Parses the manifest fields
+3. Checks whether `device_model` matches `ce-40876`
+4. Downloads the firmware file chunk by chunk while computing the streaming `SHA-256` and the actual size
+5. Checks whether `size` matches
+6. Checks whether `sha256` matches
+7. Stores `version` in NVS and prints `UPDATE_OK version=N`
 
-نکته‌ی مهم: فایل firmware روی هیچ پارتیشن فلش نوشته نمی‌شود و اجرا هم نمی‌شود؛
-فقط دانلود و هش می‌شود تا اعتبارسنجی شود. تنها چیزی که به‌صورت ماندگار تغییر می‌کند،
-مقدار `version` ذخیره‌شده در NVS است.
+Important note: the firmware file is not written to any flash partition and is not executed. It is only downloaded and hashed for validation. The only value that is persistently changed is the `version` stored in NVS.
 
 ---
 
-## خروجی‌ها
+## Outputs
 
-خطاها:
+Errors:
 
 ```text
 ERR usage: update_apply <manifest_url>
@@ -156,46 +154,47 @@ ERR sha256_mismatch
 
 ---
 
-## رفتار واقعی در سناریوهای تست
+## Actual Behavior in Test Scenarios
 
-| سناریو                                   | رفتار firmware فعلی                               |
-|------------------------------------------|--------------------------------------------------|
-| بسته معتبر با نسخه جدیدتر                | پذیرفته می‌شود → `UPDATE_OK version=N`           |
-| فایل باینری تغییر کند ولی hash درست باشد | پذیرفته می‌شود (hash جدید با manifest می‌خواند)  |
-| manifest با امضای نامعتبر                | **بررسی نمی‌شود** و پذیرفته می‌شود (آسیب‌پذیری)  |
-| نسخه قدیمی‌تر از نسخه ذخیره‌شده          | **رد نمی‌شود** و پذیرفته می‌شود (آسیب‌پذیری rollback) |
-| مدل دستگاه اشتباه                        | رد می‌شود → `ERR device_model_mismatch`          |
-| hash فایل نادرست                         | رد می‌شود → `ERR sha256_mismatch`                |
-| اندازه‌ی فایل نادرست                     | رد می‌شود → `ERR size_mismatch ...`              |
+| Scenario                                    | Current firmware behavior                              |
+| ------------------------------------------- | ------------------------------------------------------ |
+| Valid package with a newer version          | Accepted → `UPDATE_OK version=N`                       |
+| Binary file changes but the hash is correct | Accepted, because the new hash matches the manifest    |
+| Manifest with an invalid signature          | **Not checked** and accepted — vulnerability           |
+| Version older than the stored version       | **Not rejected** and accepted — rollback vulnerability |
+| Wrong device model                          | Rejected → `ERR device_model_mismatch`                 |
+| Incorrect file hash                         | Rejected → `ERR sha256_mismatch`                       |
+| Incorrect file size                         | Rejected → `ERR size_mismatch ...`                     |
 
 ---
 
-## تحلیل امنیتی
+## Security Analysis
 
-بررسی `SHA-256` فقط نشان می‌دهد فایل دانلودشده با مقدار hash داخل manifest یکی است. اما اگر مهاجم بتواند هم فایل باینری و هم manifest را تغییر دهد، می‌تواند hash جدید را هم داخل manifest قرار دهد و دستگاه آن بسته را معتبر تشخیص می‌دهد.
+The `SHA-256` check only shows that the downloaded file matches the hash value inside the manifest. However, if an attacker can modify both the binary file and the manifest, they can also place the new hash inside the manifest, and the device will consider the package valid.
 
-بنابراین hash به‌تنهایی برای اعتماد کافی نیست. برای اعتماد به بسته، خود manifest باید امضای دیجیتال داشته باشد، چون فیلدهای مهمی مثل `version`، `device_model`، `size`، `sha256` و `firmware_url` داخل manifest قرار دارند.
+Therefore, a hash alone is not enough for trust. To trust the package, the manifest itself must have a digital signature, because important fields such as `version`, `device_model`, `size`, `sha256`, and `firmware_url` are all inside the manifest.
 
-علاوه بر آن، چون نسخه‌ی فعلی هیچ بررسی‌ای روی ترتیب نسخه‌ها انجام نمی‌دهد، حمله‌ی rollback ممکن است: مهاجم می‌تواند یک نسخه‌ی قدیمی‌تر (و احتمالاً آسیب‌پذیر) را دوباره نصب کند.
+In addition, because the current version does not perform any check on version ordering, a rollback attack is possible: an attacker can reinstall an older, and possibly vulnerable, version.
 
+---
 
-## آزمایش بسته‌ی تغییریافته (Tampered Package)
+## Testing a Tampered Package
 
-هدف این آزمایش بررسی این پرسش است: اگر مهاجم بتواند **هم فایل باینری و هم manifest را با هم تغییر دهد**، آیا دستگاه همچنان بسته را می‌پذیرد؟
+The goal of this test is to answer the following question: if an attacker can modify **both the binary file and the manifest together**, will the device still accept the package?
 
-### ۱) ساخت یک باینری تغییریافته
+### 1) Creating a Tampered Binary
 
-یک فایل firmware جعلی می‌سازیم (محتوای آن متفاوت از باینری اصلی است):
+We create a fake firmware file whose contents differ from the original binary:
 
 ```bash
 cp E1_Students/build/CE40876_E2_update.bin files/CE40876_E2_update.bin
 echo 'MALICIOUS_PAYLOAD' >> files/CE40876_E2_update.bin
 ```
 
-با این کار هم محتوای فایل و هم `size` آن نسبت به نسخه‌ی اصلی تغییر می‌کند، بنابراین `sha256` نیز کاملاً متفاوت خواهد بود.
+This changes both the file contents and its `size` compared to the original version, so the `sha256` will also be completely different.
 
+Below is the output of changing the binary file without changing the hash and size. In the second attempt, the size was corrected, but the hash mismatch caused an error:
 
-در زیر خروجی اجرای عوض کردن فایل باینری بدون عوض کردن hash و size را مشاهده می‌کنید. در تلاش دوم size درست شده است ولی عدم تطابق hash خطا می‌دهد:
 ```shell
 > version
 device_model=ce-40876
@@ -211,9 +210,9 @@ ERR sha256_mismatch
 > 
 ```
 
-### ۲) ساخت manifest متناظر با باینری تغییریافته
+### 2) Creating a Manifest Corresponding to the Tampered Binary
 
-از آنجا که `make_manifest.py` خودش `size` و `sha256` را از روی فایل واقعی محاسبه می‌کند، manifest جدید **با باینری تغییریافته سازگار (consistent)** خواهد بود:
+Since `make_manifest.py` calculates the `size` and `sha256` from the actual file, the new manifest will be **consistent** with the tampered binary:
 
 ```bash
 python3 tools/make_manifest.py \
@@ -224,7 +223,7 @@ python3 tools/make_manifest.py \
   --out files/manifest.json
 ```
 
-manifest تولیدشده (مقادیر `size` و `sha256` با فایل تغییریافته مطابقت دارند):
+Generated manifest, where `size` and `sha256` match the tampered file:
 
 ```json5
 {
@@ -236,17 +235,16 @@ manifest تولیدشده (مقادیر `size` و `sha256` با فایل تغی�
 }
 ```
 
-در اینجا مهاجم نه‌تنها باینری را عوض کرده، بلکه `size` و `sha256` داخل manifest را هم به مقادیر جدیدِ همان باینری به‌روزرسانی کرده است؛ یعنی manifest و باینری با هم سازگارند.
+Here, the attacker has not only changed the binary, but also updated the `size` and `sha256` fields inside the manifest to the new values of that same binary. In other words, the manifest and the binary are consistent with each other.
 
-
-### ۳) اجرا روی برد و مستندسازی نتیجه
+### 3) Running on the Board and Documenting the Result
 
 ```text
 > update_apply http://10.114.151.190:8000/manifest.json
 UPDATE_OK version=3
 ```
 
-بررسی نسخه پس از اجرا:
+Checking the version afterward:
 
 ```text
 > version
@@ -255,35 +253,35 @@ current_version=3
 update_state=ready
 ```
 
-**نتیجه:** دستگاه بسته‌ی تغییریافته را **می‌پذیرد**. زیرا تنها بررسی‌های firmware فعلی (`device_model`، `size`، `sha256`) همگی موفق می‌شوند — `size` و `sha256` داخل manifest دقیقاً با فایل باینریِ تغییریافته مطابقت دارند و فیلد `signature` نادیده گرفته می‌شود.
+**Result:** the device **accepts** the tampered package. This is because all checks performed by the current firmware — `device_model`, `size`, and `sha256` — pass successfully. The `size` and `sha256` values inside the manifest exactly match the tampered binary file, and the `signature` field is ignored.
 
-### ۴) چرا این اتفاق می‌افتد؟
+### 4) Why Does This Happen?
 
-بررسی `SHA-256` فقط تطابق بین «فایل دانلودشده» و «مقدار hash نوشته‌شده در manifest» را می‌سنجد. وقتی مهاجم هر دو را با هم کنترل کند، می‌تواند یک جفت سازگار (باینری حاوی کد مخرب + manifest با hash و size همان باینری) بسازد و بررسی hash همچنان موفق خواهد شد.
-
----
-
-## SHA-256 دقیقاً چه چیزی را تضمین می‌کند و چه چیزی را نمی‌کند؟
-
-**چیزی که SHA-256 تضمین می‌کند (Integrity نسبت به manifest):**
-
-* یکپارچگی (integrity) فایل نسبت به مقدار hash داخل manifest؛ یعنی فایل در حین انتقال یا روی سرور به‌صورت تصادفی خراب/قطع/تغییر نکرده است.
-* اگر فایل باینری تغییر کند ولی مقدار `sha256` در manifest ثابت بماند، بررسی **رد می‌شود** (همان حالت `ERR sha256_mismatch`).
-* تشخیص خرابی غیرعمدی (نویز شبکه، فایل ناقص، اشتباه در کپی).
-
-**چیزی که SHA-256 تضمین نمی‌کند (Authenticity / Trust):**
-
-* اصالت و قابل‌اعتماد بودن منبع (authenticity) را تضمین نمی‌کند؛ hash نمی‌گوید چه کسی فایل را ساخته است.
-* اگر مهاجم هم باینری و هم manifest را کنترل کند، می‌تواند hash جدید را داخل manifest بنویسد و بررسی hash بی‌اثر می‌شود (همان آزمایش بالا).
-* جلوگیری از حمله‌ی rollback را تضمین نمی‌کند؛ نسخه‌ی قدیمی هم می‌تواند hash درست داشته باشد.
-
-به‌طور خلاصه: **SHA-256 یکپارچگی می‌دهد، اما اصالت نمی‌دهد.** برای اصالت لازم است manifest با یک کلید خصوصی **امضای دیجیتال** شود (مثلاً ECDSA P-256 روی فرم canonical فیلدها) و دستگاه امضا را با کلید عمومی معتبر بررسی کند. در آن صورت، مهاجمی که کلید خصوصی را ندارد نمی‌تواند یک manifest سازگار و معتبرِ امضاشده تولید کند، حتی اگر هم باینری و هم manifest را تغییر دهد.
+The `SHA-256` check only verifies the match between the “downloaded file” and the “hash value written in the manifest.” When the attacker controls both, they can create a consistent pair — a binary containing malicious code plus a manifest containing that binary’s hash and size — and the hash check will still pass.
 
 ---
 
+## What Exactly Does SHA-256 Guarantee, and What Does It Not Guarantee?
 
-## بازگشت به نسخه قدیمی
-در این آزمایش مشخص شد firmware فعلی هیچ بررسی‌ای برای جلوگیری از نصب نسخه‌ی قدیمی‌تر انجام نمی‌دهد. با اینکه نسخه‌ی ذخیره‌شده روی دستگاه 2 بود، manifest مربوط به نسخه‌ی 1 پذیرفته شد و مقدار نسخه در NVS به 1 تغییر کرد. این رفتار نشان‌دهنده‌ی آسیب‌پذیری rollback است؛ یعنی مهاجم می‌تواند دستگاه را به نسخه‌ای قدیمی‌تر و احتمالاً آسیب‌پذیر برگرداند. برای جلوگیری از این مشکل، firmware باید فقط نسخه‌هایی را بپذیرد که مقدار version آن‌ها از نسخه‌ی فعلی بزرگ‌تر باشد.
+**What SHA-256 guarantees — integrity relative to the manifest:**
+
+* Integrity of the file relative to the hash value inside the manifest; that is, the file was not accidentally corrupted, truncated, or changed during transfer or on the server.
+* If the binary file changes but the `sha256` value in the manifest remains fixed, the check **fails**, as in the `ERR sha256_mismatch` case.
+* Detection of unintentional corruption, such as network noise, incomplete files, or copy errors.
+
+**What SHA-256 does not guarantee — authenticity / trust:**
+
+* It does not guarantee authenticity or trustworthiness of the source; the hash does not say who created the file.
+* If an attacker controls both the binary and the manifest, they can write the new hash into the manifest, making the hash check ineffective, as shown in the test above.
+* It does not prevent rollback attacks; an old version can also have a correct hash.
+
+In short: **SHA-256 provides integrity, but not authenticity.** For authenticity, the manifest must be **digitally signed** with a private key, for example using ECDSA P-256 over the canonical form of the fields, and the device must verify the signature using the trusted public key. In that case, an attacker who does not have the private key cannot create a consistent and valid signed manifest, even if they modify both the binary and the manifest.
+
+---
+
+## Rollback to an Older Version
+
+In this test, it was shown that the current firmware does not perform any check to prevent installation of an older version. Although the stored version on the device was 2, the manifest for version 1 was accepted, and the version value in NVS was changed to 1. This behavior indicates a rollback vulnerability: an attacker can revert the device to an older and possibly vulnerable version. To prevent this issue, the firmware must only accept versions whose `version` value is greater than the current version.
 
 ```shell
 > version
@@ -297,22 +295,23 @@ UPDATE_OK version=1
 
 ---
 
-## آسیب‌پذیری‌های شناسایی‌شده در نسخه‌ی فعلی
+## Vulnerabilities Identified in the Current Version
 
-* امضای دیجیتال manifest **اعتبارسنجی نمی‌شود** (فیلد `signature` فقط parse می‌شود و نادیده گرفته می‌شود).
-* هیچ بررسی‌ای برای جلوگیری از rollback وجود ندارد؛ هر نسخه‌ای (حتی قدیمی‌تر) پذیرفته می‌شود.
+* The digital signature of the manifest is **not validated**; the `signature` field is only parsed and ignored.
+* There is no check to prevent rollback; any version, even an older one, is accepted.
 
 ---
 
-## اصلاحات امنیتی پیشنهادی 
+## Proposed Security Fixes
 
-برای امن‌کردن این سرویس، موارد زیر پیشنهاد می‌شود:
+To secure this service, the following measures are recommended:
 
-* بررسی امضای دیجیتال manifest (ECDSA P-256 روی فرم canonical فیلدها) و رد manifest با امضای نامعتبر
-* بررسی نسخه و رد بسته‌هایی با نسخه‌ی مساوی/قدیمی‌تر از نسخه‌ی ذخیره‌شده برای جلوگیری از rollback
-* استفاده از HTTPS برای دانلود manifest و firmware (البته با وجود امضای دیجیتال روی manifest و چک هنگام بروزرسانی دغدغه اتک‌های http را کمتر داریم ولی همچنان به دلیل محرمانگی شاید نیاز داشته باشیم)
+* Validate the manifest’s digital signature, using ECDSA P-256 over the canonical form of the fields, and reject manifests with invalid signatures.
+* Check the version and reject packages whose version is equal to or older than the stored version, in order to prevent rollback.
+* Use HTTPS to download the manifest and firmware. Although a digital signature on the manifest and validation during the update reduce concerns about HTTP attacks, HTTPS may still be needed for confidentiality.
 
-> ساخت manifest امضاشده با اسکریپت موجود ممکن است:
+> Creating a signed manifest with the existing script is possible:
+>
 > ```bash
 > python3 tools/make_manifest.py \
 >   --firmware files/CE40876_E2_update.bin \
@@ -322,20 +321,21 @@ UPDATE_OK version=1
 >   --key private_key.pem \
 >   --out files/manifest.json
 > ```
-> برای ساخت یک امضای خراب جهت تست، می‌توان از فلگ `--bad-signature` استفاده کرد.
+>
+> To create a bad signature for testing, the `--bad-signature` flag can be used.
 
 ---
 
-## مرحله ۴: اصلاح طراحی و پیاده‌سازی
+## Step 4: Design and Implementation Fixes
 
-برای رفع ضعف‌های امنیتی مشاهده‌شده، طراحی به‌روزرسانی باید به‌گونه‌ای تغییر کند که firmware قبل از پذیرش هر بسته، ابتدا اصالت manifest را بررسی کند و سپس از نصب نسخه‌های قدیمی‌تر جلوگیری شود. در این مرحله دو اصلاح اصلی انجام می‌شود:
+To fix the observed security weaknesses, the update design must be changed so that the firmware first verifies the authenticity of the manifest before accepting any package, and then prevents installation of older versions. In this step, two main fixes are implemented:
 
-1. اعتبارسنجی امضای دیجیتال manifest
-2. جلوگیری از rollback با بررسی شماره نسخه
+1. Validation of the manifest’s digital signature
+2. Prevention of rollback by checking the version number
 
-ابتدا برای امضای manifest به یک جفت کلید خصوصی و عمومی نیاز داریم. کلید خصوصی فقط در سمت تولیدکننده‌ی manifest نگهداری می‌شود و برای امضا کردن manifest استفاده می‌شود. کلید عمومی داخل firmware قرار می‌گیرد تا دستگاه بتواند صحت امضا را بررسی کند.
+First, signing the manifest requires a private/public key pair. The private key is kept only on the manifest producer’s side and is used to sign the manifest. The public key is embedded in the firmware so that the device can verify the signature.
 
-تولید کلیدها با دستورهای زیر انجام شد:
+The keys were generated using the following commands:
 
 ```shell
 # Private key (keep secret, used by the signer)
@@ -345,10 +345,9 @@ openssl ecparam -name prime256v1 -genkey -noout -out priv.pem
 openssl ec -in priv.pem -pubout -out pub.pem
 ```
 
+After generating the keys, the `make_manifest.py` file was updated so that it can sign the manifest using the private key. As a result, important manifest fields such as `device_model`, `version`, `size`, `sha256`, and `firmware_url` can no longer be modified by an attacker, because any change to these fields invalidates the signature.
 
-پس از تولید کلیدها، فایل `make_manifest.py` به‌روزرسانی شد تا بتواند با استفاده از کلید خصوصی، manifest را امضا کند. در نتیجه، فیلدهای مهم manifest مانند `device_model`، `version`، `size`، `sha256` و `firmware_url` دیگر قابل تغییر توسط مهاجم نیستند؛ زیرا هر تغییری در این فیلدها باعث نامعتبر شدن امضا می‌شود.
-
-برای اینکه firmware بتواند امضا را بررسی کند، کلید عمومی باید داخل `main.c` قرار گیرد. برای استخراج کلید عمومی به فرم آرایه‌ی C از کد زیر استفاده شد:
+For the firmware to verify the signature, the public key must be placed inside `main.c`. The following code was used to extract the public key as a C array:
 
 ```python
 def print_pubkey_c_array(key):
@@ -364,11 +363,11 @@ def print_pubkey_c_array(key):
     print('};')
 ```
 
-خروجی این تابع به‌صورت یک آرایه‌ی ۶۵ بایتی در `main.c` قرار می‌گیرد. این آرایه همان کلید عمومی منحنی P-256 است و برای تابع بررسی امضا استفاده می‌شود.
+The output of this function is placed in `main.c` as a 65-byte array. This array is the P-256 curve public key and is used by the signature verification function.
 
-در firmware نیز تابع `verify_manifest_signature` اضافه شد. این تابع امضای موجود در manifest را با استفاده از کلید عمومی بررسی می‌کند. نکته‌ی مهم این است که بررسی امضا باید قبل از اعتماد به هر فیلد manifest انجام شود؛ چون تا زمانی که امضا معتبر نباشد، مقدارهایی مثل نسخه، hash، اندازه و آدرس firmware قابل اعتماد نیستند.
+In the firmware, the `verify_manifest_signature` function was also added. This function verifies the signature inside the manifest using the public key. The important point is that signature verification must happen before trusting any manifest field, because until the signature is valid, values such as version, hash, size, and firmware URL cannot be trusted.
 
-بخش اصلی منطق به‌روزرسانی در `main.c` به شکل زیر اصلاح شد:
+The main update logic in `main.c` was modified as follows:
 
 ```c++
     /* 1) Authenticate the WHOLE manifest first. Once the signature is valid,
@@ -422,13 +421,14 @@ def print_pubkey_c_array(key):
     uart_printf("UPDATE_OK version=%lu\r\n", (unsigned long)g_current_version);
 ```
 
-با این تغییرات، ترتیب بررسی‌ها امن‌تر شده است. ابتدا manifest احراز اصالت می‌شود، سپس مدل دستگاه و نسخه بررسی می‌شوند، و در نهایت فایل firmware دانلود شده و از نظر اندازه و hash با مقادیر امضاشده داخل manifest مقایسه می‌شود.
+With these changes, the order of checks is more secure. First, the manifest is authenticated; then the device model and version are checked; finally, the firmware file is downloaded and its size and hash are compared with the signed values inside the manifest.
 
-در طراحی جدید، اگر مهاجم باینری و manifest را با هم تغییر دهد، دیگر نمی‌تواند بسته‌ی جعلی معتبر بسازد؛ زیرا برای تولید امضای معتبر به کلید خصوصی نیاز دارد. همچنین اگر manifest مربوط به یک نسخه‌ی قدیمی‌تر ارائه شود، firmware آن را با خطای `ERR version_too_old` رد می‌کند. بنابراین دو آسیب‌پذیری اصلی نسخه‌ی قبلی، یعنی نبود احراز اصالت manifest و امکان rollback، در این مرحله برطرف شده‌اند.
+In the new design, if an attacker modifies both the binary and the manifest, they can no longer create a valid fake package, because producing a valid signature requires the private key. Also, if a manifest for an older version is provided, the firmware rejects it with `ERR version_too_old`. Therefore, the two main vulnerabilities in the previous version — lack of manifest authenticity verification and rollback possibility — are fixed in this step.
 
-## manifests:
+## Manifests:
 
 ### 1-manifest_valid.json
+
 ```json
 {
   "device_model": "ce-40876",
@@ -441,6 +441,7 @@ def print_pubkey_c_array(key):
 ```
 
 ### 2-manifest_tampered.json
+
 ```json
 {
   "device_model": "ce-40876",
@@ -453,6 +454,7 @@ def print_pubkey_c_array(key):
 ```
 
 ### 3-manifest_old_version.json
+
 ```json
 {
   "device_model": "ce-40876",
@@ -465,6 +467,7 @@ def print_pubkey_c_array(key):
 ```
 
 ### 4-manifest_wrong_model.json
+
 ```json
 {
   "device_model": "EE-40876",
@@ -477,6 +480,7 @@ def print_pubkey_c_array(key):
 ```
 
 ### 5-manifest_bad_hash.json
+
 ```json
 {
   "device_model": "ce-40876",
@@ -488,11 +492,14 @@ def print_pubkey_c_array(key):
 }
 ```
 
-## جمع‌بندی
-در این تمرین مشخص شد که بررسی SHA-256 فقط یکپارچگی فایل firmware را نسبت به مقدار داخل manifest تضمین می‌کند و به‌تنهایی برای اعتماد به بسته کافی نیست. در نسخه‌ی اولیه، چون امضای دیجیتال manifest بررسی نمی‌شد، مهاجم می‌توانست هم فایل firmware و هم manifest را تغییر دهد و بسته‌ی جعلی همچنان پذیرفته شود. همچنین به دلیل نبود بررسی نسخه، امکان rollback به نسخه‌ی قدیمی‌تر وجود داشت.
-برای رفع این ضعف‌ها، در طراحی جدید ابتدا امضای دیجیتال manifest با کلید عمومی داخل firmware اعتبارسنجی می‌شود و سپس نسخه‌ی پیشنهادی با نسخه‌ی ذخیره‌شده در NVS مقایسه می‌گردد. به این ترتیب، بسته‌های جعلی و نسخه‌های قدیمی‌تر رد می‌شوند و فرآیند به‌روزرسانی امنیت بیشتری پیدا می‌کند.
+## Conclusion
 
-## محدودیت‌ها
-* در این تمرین فایل firmware روی پارتیشن OTA نوشته و اجرا نمی‌شود.
-* تمرکز فقط روی اعتبارسنجی manifest، بررسی hash/size، سیاست نسخه و ثبت version در NVS است.
-* HTTP استفاده شده و محرمانگی مسیر دانلود را تضمین نمی‌کند؛ اما اصالت manifest با امضای دیجیتال کنترل می‌شود.
+In this exercise, it was shown that checking SHA-256 only guarantees the integrity of the firmware file relative to the value inside the manifest, and is not enough on its own to trust the package. In the initial version, because the manifest’s digital signature was not checked, an attacker could modify both the firmware file and the manifest, and the fake package would still be accepted. Also, because there was no version check, rollback to an older version was possible.
+
+To fix these weaknesses, in the new design the digital signature of the manifest is first verified using the public key embedded in the firmware, and then the proposed version is compared with the version stored in NVS. This way, fake packages and older versions are rejected, and the update process becomes more secure.
+
+## Limitations
+
+* In this exercise, the firmware file is not written to or executed from an OTA partition.
+* The focus is only on manifest validation, hash/size checking, version policy, and recording the version in NVS.
+* HTTP is used, so confidentiality of the download path is not guaranteed; however, manifest authenticity is controlled with a digital signature.
