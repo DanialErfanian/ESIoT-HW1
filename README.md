@@ -319,19 +319,107 @@ UPDATE_OK version=1
 
 ---
 
-## نکات و محدودیت‌ها
+## مرحله ۴: اصلاح طراحی و پیاده‌سازی
 
-* در URL نباید از `localhost` استفاده شود؛ چون برد باید IP لپ‌تاپ را ببیند.
-* در این اجرا IP لپ‌تاپ برابر بود با `10.114.151.190`.
-* اگر شبکه ارتباط مستقیم بین لپ‌تاپ و برد را محدود کند، باید از hotspot یا روتر محلی استفاده شود.
-* در این تمرین firmware واقعاً روی پارتیشن OTA نوشته نمی‌شود و تمرکز روی اعتبارسنجی manifest است.
-* اگر نسخه‌ی ذخیره‌شده در NVS باعث مزاحمت در تست‌ها شد، می‌توان نسخه را به ۱ بازنشانی کرد:
+برای رفع ضعف‌های امنیتی مشاهده‌شده، طراحی به‌روزرسانی باید به‌گونه‌ای تغییر کند که firmware قبل از پذیرش هر بسته، ابتدا اصالت manifest را بررسی کند و سپس از نصب نسخه‌های قدیمی‌تر جلوگیری شود. در این مرحله دو اصلاح اصلی انجام می‌شود:
 
-```text
-reset_state CONFIRM
+1. اعتبارسنجی امضای دیجیتال manifest
+2. جلوگیری از rollback با بررسی شماره نسخه
+
+ابتدا برای امضای manifest به یک جفت کلید خصوصی و عمومی نیاز داریم. کلید خصوصی فقط در سمت تولیدکننده‌ی manifest نگهداری می‌شود و برای امضا کردن manifest استفاده می‌شود. کلید عمومی داخل firmware قرار می‌گیرد تا دستگاه بتواند صحت امضا را بررسی کند.
+
+تولید کلیدها با دستورهای زیر انجام شد:
+
+```shell
+# Private key (keep secret, used by the signer)
+openssl ecparam -name prime256v1 -genkey -noout -out priv.pem
+
+# Public key (PEM, just for reference)
+openssl ec -in priv.pem -pubout -out pub.pem
 ```
 
----
+
+پس از تولید کلیدها، فایل `make_manifest.py` به‌روزرسانی شد تا بتواند با استفاده از کلید خصوصی، manifest را امضا کند. در نتیجه، فیلدهای مهم manifest مانند `device_model`، `version`، `size`، `sha256` و `firmware_url` دیگر قابل تغییر توسط مهاجم نیستند؛ زیرا هر تغییری در این فیلدها باعث نامعتبر شدن امضا می‌شود.
+
+برای اینکه firmware بتواند امضا را بررسی کند، کلید عمومی باید داخل `main.c` قرار گیرد. برای استخراج کلید عمومی به فرم آرایه‌ی C از کد زیر استفاده شد:
+
+```python
+def print_pubkey_c_array(key):
+    pub = key.public_key().public_bytes(
+        serialization.Encoding.X962,
+        serialization.PublicFormat.UncompressedPoint,
+    )
+    assert len(pub) == 65 and pub[0] == 0x04
+    print('static const uint8_t g_manifest_pubkey[65] = {')
+    for i in range(0, 65, 8):
+        chunk = pub[i:i + 8]
+        print('    ' + ' '.join(f'0x{b:02x},' for b in chunk))
+    print('};')
+```
+
+خروجی این تابع به‌صورت یک آرایه‌ی ۶۵ بایتی در `main.c` قرار می‌گیرد. این آرایه همان کلید عمومی منحنی P-256 است و برای تابع بررسی امضا استفاده می‌شود.
+
+در firmware نیز تابع `verify_manifest_signature` اضافه شد. این تابع امضای موجود در manifest را با استفاده از کلید عمومی بررسی می‌کند. نکته‌ی مهم این است که بررسی امضا باید قبل از اعتماد به هر فیلد manifest انجام شود؛ چون تا زمانی که امضا معتبر نباشد، مقدارهایی مثل نسخه، hash، اندازه و آدرس firmware قابل اعتماد نیستند.
+
+بخش اصلی منطق به‌روزرسانی در `main.c` به شکل زیر اصلاح شد:
+
+```c++
+    /* 1) Authenticate the WHOLE manifest first. Once the signature is valid,
+     *    every field (model, version, size, hash, url) can be trusted. */
+    if (!verify_manifest_signature(&m)) {
+        uart_write_str("ERR signature_invalid\r\n");
+        return;
+    }
+
+    /* 2) Device model must match this device. */
+    if (strcmp(m.device_model, DEVICE_MODEL) != 0) {
+        uart_write_str("ERR device_model_mismatch\r\n");
+        return;
+    }
+
+    /* 3) Anti-rollback: reject versions lower than the last valid version. */
+    if (m.version < g_current_version) {
+        uart_printf("ERR version_too_old offered=%lu current=%lu\r\n",
+                    (unsigned long)m.version, (unsigned long)g_current_version);
+        return;
+    }
+
+    /* 4) Download the binary, computing size and SHA-256 on the fly. */
+    uint8_t actual_hash[32];
+    uint32_t actual_size = 0;
+    err = http_hash_and_size(m.firmware_url, actual_hash, &actual_size);
+    if (err != ESP_OK) {
+        uart_printf("ERR firmware_download %s\r\n", esp_err_to_name(err));
+        return;
+    }
+
+    char actual_hex[65];
+    bytes_to_hex(actual_hash, sizeof(actual_hash), actual_hex, sizeof(actual_hex));
+
+    /* 5) Size must match the signed manifest. */
+    if (actual_size != m.size) {
+        uart_printf("ERR size_mismatch expected=%lu actual=%lu\r\n",
+                    (unsigned long)m.size, (unsigned long)actual_size);
+        return;
+    }
+
+    /* 6) SHA-256 must match the signed manifest. */
+    if (strcasecmp(actual_hex, m.sha256) != 0) {
+        uart_write_str("ERR sha256_mismatch\r\n");
+        return;
+    }
+
+    /* 7) All checks passed: store the new last-valid version in NVS. */
+    g_current_version = m.version;
+    nvs_write_u32_val(KEY_VERSION, g_current_version);
+    uart_printf("UPDATE_OK version=%lu\r\n", (unsigned long)g_current_version);
+```
+
+با این تغییرات، ترتیب بررسی‌ها امن‌تر شده است. ابتدا manifest احراز اصالت می‌شود، سپس مدل دستگاه و نسخه بررسی می‌شوند، و در نهایت فایل firmware دانلود شده و از نظر اندازه و hash با مقادیر امضاشده داخل manifest مقایسه می‌شود.
+
+در طراحی جدید، اگر مهاجم باینری و manifest را با هم تغییر دهد، دیگر نمی‌تواند بسته‌ی جعلی معتبر بسازد؛ زیرا برای تولید امضای معتبر به کلید خصوصی نیاز دارد. همچنین اگر manifest مربوط به یک نسخه‌ی قدیمی‌تر ارائه شود، firmware آن را با خطای `ERR version_too_old` رد می‌کند. بنابراین دو آسیب‌پذیری اصلی نسخه‌ی قبلی، یعنی نبود احراز اصالت manifest و امکان rollback، در این مرحله برطرف شده‌اند.
+
+
 
 ## جمع‌بندی
 
