@@ -34,8 +34,8 @@
 
 /* Set these before building. The grader hosts update files on your laptop,
  * so the ESP32 must be on the same network and able to reach --host-ip. */
-#define LAB_WIFI_SSID        "CHANGE_ME_WIFI"
-#define LAB_WIFI_PASS        "CHANGE_ME_PASSWORD"
+#define LAB_WIFI_SSID        "Danial-hotspot"
+#define LAB_WIFI_PASS        "upux6158"
 #define WIFI_CONNECTED_BIT   BIT0
 
 #define DEVICE_MODEL         "ce-40876"
