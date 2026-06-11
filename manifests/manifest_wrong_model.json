@@ -1,0 +1,8 @@
+{
+  "device_model": "EE-40876",
+  "version": 5,
+  "size": 902256,
+  "sha256": "71c1988630257f3191b986b12041c4e801220a16706cf8f873ad14a40e0c777f",
+  "firmware_url": "http://10.114.151.190:8000/firmware_valid.bin",
+  "signature": "b78618f6494069c6c6914d893728c834bab4b4a4dc693298b307f7cbafe2550edb5b00dd9ca5067d6d66f698714d012fa4fa10865a946905385c66692ce2d7c6"
+}

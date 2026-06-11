@@ -1,0 +1,8 @@
+{
+  "device_model": "ce-40876",
+  "version": 5,
+  "size": 902256,
+  "sha256": "71c1988630257f3191b986b12041c4e801220a16706cf8f873ad14a40e0c777f",
+  "firmware_url": "http://10.114.151.190:8000/firmware_valid.bin",
+  "signature": "f91ca992eff1e1610630465a42dda0f870a04311ddd36c69b3ddcc1ec38953a98bc449ece870937afc1a0a48cc932464b242bca21da4a8c31dcec6deb2c09f9d"
+}

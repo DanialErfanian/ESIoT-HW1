@@ -1,4 +1,3 @@
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -42,6 +41,35 @@
 #define NS_SYS               "sys"
 #define KEY_VERSION          "ver"
 
+/* ----------------------------------------------------------------------------
+ * Manifest signing public key (ECDSA, curve secp256r1 / P-256, SHA-256).
+ *
+ * The signer (your laptop / build server) holds the matching PRIVATE key.
+ * The signature is computed over the canonical manifest payload produced by
+ * build_signing_payload() below, i.e. over:
+ *
+ *     "<device_model>|<version>|<size>|<sha256>|<firmware_url>"
+ *
+ * This means the *whole* manifest (version, model, size, hash, URL) is
+ * authenticated, not just the binary.
+ *
+ * Public key format below: uncompressed EC point, 65 bytes = 0x04 || X || Y.
+ * Replace the bytes with YOUR real public key.
+ * -------------------------------------------------------------------------- */
+static const uint8_t g_manifest_pubkey[65] = {
+    0x04,
+    /* X (32 bytes) */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /* Y (32 bytes) */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
 static uint32_t g_current_version = 1;
 static EventGroupHandle_t s_wifi_event_group;
 
@@ -51,7 +79,7 @@ typedef struct {
     uint32_t size;
     char sha256[65];
     char firmware_url[256];
-    char signature[129];
+    char signature[129];   /* hex of raw r||s, 64 bytes -> 128 hex chars */
 } manifest_t;
 
 static void uart_write_str(const char *s) {
@@ -208,6 +236,55 @@ static bool sha256_buffer(const uint8_t *data, size_t len, uint8_t out32[32]) {
     return st == PSA_SUCCESS && hash_len == 32;
 }
 
+/* Build the canonical payload that the signature is computed over.
+ * The signer MUST build the exact same string before signing. */
+static int build_signing_payload(const manifest_t *m, char *out, size_t out_sz) {
+    return snprintf(out, out_sz, "%s|%lu|%lu|%s|%s",
+                    m->device_model,
+                    (unsigned long)m->version,
+                    (unsigned long)m->size,
+                    m->sha256,
+                    m->firmware_url);
+}
+
+/* Verify the ECDSA P-256 signature over the canonical manifest payload. */
+static bool verify_manifest_signature(const manifest_t *m) {
+    char payload[512];
+    int n = build_signing_payload(m, payload, sizeof(payload));
+    if (n <= 0 || n >= (int)sizeof(payload)) return false;
+
+    uint8_t hash[32];
+    if (!sha256_buffer((const uint8_t *)payload, (size_t)n, hash)) return false;
+
+    /* signature field must be present and exactly 64 raw bytes (128 hex chars) */
+    uint8_t sig[64];
+    if (!hex_to_bytes(m->signature, sig, sizeof(sig))) return false;
+
+    psa_status_t st = psa_crypto_init();
+    if (st != PSA_SUCCESS) return false;
+
+    psa_key_attributes_t attr = PSA_KEY_ATTRIBUTES_INIT;
+    psa_set_key_type(&attr, PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attr, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+    psa_set_key_bits(&attr, 256);
+
+    psa_key_id_t key_id = 0;
+    st = psa_import_key(&attr, g_manifest_pubkey, sizeof(g_manifest_pubkey), &key_id);
+    if (st != PSA_SUCCESS) {
+        psa_reset_key_attributes(&attr);
+        return false;
+    }
+
+    st = psa_verify_hash(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256),
+                         hash, sizeof(hash), sig, sizeof(sig));
+
+    psa_destroy_key(key_id);
+    psa_reset_key_attributes(&attr);
+
+    return st == PSA_SUCCESS;
+}
+
 static esp_err_t http_get_to_buffer(const char *url, char *out, size_t out_sz) {
     esp_http_client_config_t cfg = {
         .url = url,
@@ -323,14 +400,15 @@ static bool parse_manifest(const char *json, manifest_t *m) {
     cJSON *sig = cJSON_GetObjectItem(root, "signature");
 
     bool ok = cJSON_IsString(model) && cJSON_IsNumber(version) &&
-              cJSON_IsNumber(size) && cJSON_IsString(sha) && cJSON_IsString(fw);
+              cJSON_IsNumber(size) && cJSON_IsString(sha) &&
+              cJSON_IsString(fw) && cJSON_IsString(sig);
     if (ok) {
         snprintf(m->device_model, sizeof(m->device_model), "%s", model->valuestring);
         m->version = (uint32_t)version->valuedouble;
         m->size = (uint32_t)size->valuedouble;
         snprintf(m->sha256, sizeof(m->sha256), "%s", sha->valuestring);
         snprintf(m->firmware_url, sizeof(m->firmware_url), "%s", fw->valuestring);
-        if (cJSON_IsString(sig)) snprintf(m->signature, sizeof(m->signature), "%s", sig->valuestring);
+        snprintf(m->signature, sizeof(m->signature), "%s", sig->valuestring);
     }
 
     cJSON_Delete(root);
@@ -433,11 +511,27 @@ static void cmd_update_apply(const char *manifest_url) {
         return;
     }
 
+    /* 1) Authenticate the WHOLE manifest first. Once the signature is valid,
+     *    every field (model, version, size, hash, url) can be trusted. */
+    if (!verify_manifest_signature(&m)) {
+        uart_write_str("ERR signature_invalid\r\n");
+        return;
+    }
+
+    /* 2) Device model must match this device. */
     if (strcmp(m.device_model, DEVICE_MODEL) != 0) {
         uart_write_str("ERR device_model_mismatch\r\n");
         return;
     }
 
+    /* 3) Anti-rollback: reject versions lower than the last valid version. */
+    if (m.version < g_current_version) {
+        uart_printf("ERR version_too_old offered=%lu current=%lu\r\n",
+                    (unsigned long)m.version, (unsigned long)g_current_version);
+        return;
+    }
+
+    /* 4) Download the binary, computing size and SHA-256 on the fly. */
     uint8_t actual_hash[32];
     uint32_t actual_size = 0;
     err = http_hash_and_size(m.firmware_url, actual_hash, &actual_size);
@@ -449,17 +543,20 @@ static void cmd_update_apply(const char *manifest_url) {
     char actual_hex[65];
     bytes_to_hex(actual_hash, sizeof(actual_hash), actual_hex, sizeof(actual_hex));
 
+    /* 5) Size must match the signed manifest. */
     if (actual_size != m.size) {
         uart_printf("ERR size_mismatch expected=%lu actual=%lu\r\n",
                     (unsigned long)m.size, (unsigned long)actual_size);
         return;
     }
 
+    /* 6) SHA-256 must match the signed manifest. */
     if (strcasecmp(actual_hex, m.sha256) != 0) {
         uart_write_str("ERR sha256_mismatch\r\n");
         return;
     }
 
+    /* 7) All checks passed: store the new last-valid version in NVS. */
     g_current_version = m.version;
     nvs_write_u32_val(KEY_VERSION, g_current_version);
     uart_printf("UPDATE_OK version=%lu\r\n", (unsigned long)g_current_version);
